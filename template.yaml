@@ -1,0 +1,93 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: PublicIpLister
+  PublicIpListenerVersion:
+    Type: String
+    Default: 1.0.6
+
+Resources:
+
+  Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: PublicIpListener
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: codebuild
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub "arn:aws:logs:*:${AWS::AccountId}:log-group:/aws/codebuild/${ProjectName}"
+                  - !Sub "arn:aws:logs:*:${AWS::AccountId}:log-group:/aws/codebuild/${ProjectName}:*"
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketAcl
+                  - s3:GetBucketLocation
+                Resource:
+                  - !Sub "arn:aws:s3:::codepipeline-*"
+        - PolicyName: library-needs
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - apigateway:GET
+                  - cloudfront:ListDistributions
+                  - ec2:DescribeInstances
+                  - elasticloadbalancing:DescribeLoadBalancers
+                  - lightsail:GetInstances
+                  - lightsail:GetLoadBalancers
+                  - rds:DescribeDBInstances
+                  - redshift:DescribeClusters
+                  - es:ListDomainNames
+                Resource: "*"
+
+  Project:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Ref ProjectName
+      ServiceRole: !GetAtt Role.Arn
+      Environment:
+        Type: linuxContainer
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/ruby:2.5.3
+        EnvironmentVariables:
+          - Name: PUBLIC_IP_LISTENER_VERSION
+            Value: !Ref PublicIpListenerVersion
+            Type: PLAINTEXT
+      Source:
+        Type: NO_SOURCE
+        BuildSpec: |
+          version: 0.2
+          phases:
+            install:
+              commands:
+                - gem install aws_public_ips -v ${PUBLIC_IP_LISTENER_VERSION}
+            build:
+              commands:
+                - aws_public_ips -f prettyjson
+          artifacts:
+            files: '**/*'
+      Artifacts:
+        Type: NO_ARTIFACTS
+      TimeoutInMinutes: 60
