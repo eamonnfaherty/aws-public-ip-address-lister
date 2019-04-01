@@ -10,6 +10,9 @@ Parameters:
 
 Resources:
 
+  Bucket:
+    Type: AWS::S3::Bucket
+
   Role:
     Type: AWS::IAM::Role
     Properties:
@@ -45,6 +48,12 @@ Resources:
                   - s3:GetBucketLocation
                 Resource:
                   - !Sub "arn:aws:s3:::codepipeline-*"
+              - Effect: Allow
+                Action:
+                  - s3:*
+                Resource:
+                  - !GetAtt Bucket.Arn
+                  - !Sub "${Bucket.Arn}/*"
         - PolicyName: library-needs
           PolicyDocument:
             Version: 2012-10-17
@@ -73,8 +82,16 @@ Resources:
         Image: aws/codebuild/ruby:2.5.3
         EnvironmentVariables:
           - Name: PUBLIC_IP_LISTENER_VERSION
-            Value: !Ref PublicIpListenerVersion
             Type: PLAINTEXT
+            Value: !Ref PublicIpListenerVersion
+          - Name: ACCOUNT_ID
+            Type: PLAINTEXT
+            Value: !Sub "${AWS::AccountId}"
+          - Name: REGIONS
+            Type: PLAINTEXT
+            Value: |
+              eu-west-1 eu-west-2 eu-west-3
+              us-east-1 us-west-1
       Source:
         Type: NO_SOURCE
         BuildSpec: |
@@ -85,9 +102,12 @@ Resources:
                 - gem install aws_public_ips -v ${PUBLIC_IP_LISTENER_VERSION}
             build:
               commands:
-                - aws_public_ips -f prettyjson
+                - for i in $REGIONS; do AWS_REGION=$i aws_public_ips -f prettyjson > results-$ACCOUNT_ID-$i.json; done
           artifacts:
-            files: '**/*'
+            files: '*'
       Artifacts:
-        Type: NO_ARTIFACTS
+        Type: S3
+        Location: !Ref Bucket
+        Name: Results
+        Path: !Sub "${AWS::AccountId}"
       TimeoutInMinutes: 60
